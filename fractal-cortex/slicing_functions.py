@@ -1275,7 +1275,7 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
     ASPEED_Scaled.append(AB_FEEDRATE)
     BSPEED_Scaled.append(AB_FEEDRATE)
     directions = np.array(directions)
-    directions[:, 1] = 90 - directions[:, 1]
+    directions[:, 1] = -directions[:, 1]  # C = -phi (nozzle tilt direction matches slice normal)
     directions[0] = [0.0, 0.0]
     AMOVE_Degrees = [sublist[1] for sublist in directions]
     AMOVE_Degrees.append(0.0)
