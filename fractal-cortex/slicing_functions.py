@@ -51,7 +51,7 @@ Contains all calculations related to 3-axis and 5-axis slicing operations.
 
 # Example Inputs
 infillType = "Triangular"
-buildRadius = 150.0  # mm
+buildRadius = 100.0  # mm (half of 200x200 bed)
 
 
 # DEFINE FUNCTIONS
@@ -1123,13 +1123,17 @@ def slice_in_5_axes(printSettings, meshData, slicingDirections):
 
 def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions, directions, chunk_transform3DList, adhesionList, chunk_shellRingsListList, chunk_optimizedInternalInfills, chunk_optimizedSolidInfills):
 
+    # Bed center offset: slicer works with origin at center, Rep5x has origin at corner
+    BED_CENTER_X = 100.0  # half of 200mm bed
+    BED_CENTER_Y = 100.0  # half of 200mm bed
+
     def transcribe_pathPoints_to_gcode(pathPoints, PRINT_FEEDRATE, runOnce, newChunk):
         global E, previousE
 
         for p in range(len(pathPoints)):
             point = pathPoints[p]
-            X = round(point[0], 5)
-            Y = round(point[1], 5)
+            X = round(point[0] + BED_CENTER_X, 5)
+            Y = round(point[1] + BED_CENTER_Y, 5)
             if p == 0:  # If it's the first point in the path
                 if enableRetraction == True:
                     openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - retractionDistance, 5)) + " ; Retraction" + "\n")
@@ -1478,14 +1482,18 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
 
 
 def write_3_axis_gcode(newFile, savedFileName, printSettings, transform3DList, adhesionList, shellRingsListList, optimizedInternalInfills, optimizedSolidInfills):
-    
+
+    # Bed center offset: slicer works with origin at center, Rep5x has origin at corner
+    BED_CENTER_X = 100.0  # half of 200mm bed
+    BED_CENTER_Y = 100.0  # half of 200mm bed
+
     def transcribe_pathPoints_to_gcode(pathPoints, PRINT_FEEDRATE, runOnce):
         global E, previousE
 
         for p in range(len(pathPoints)):
             point = pathPoints[p]
-            X = round(point[0], 5)
-            Y = round(point[1], 5)
+            X = round(point[0] + BED_CENTER_X, 5)
+            Y = round(point[1] + BED_CENTER_Y, 5)
             if p == 0:  # If it's the first point in the path
                 if enableRetraction == True:
                     openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - retractionDistance, 5)) + " ; Retraction" + "\n")

@@ -312,9 +312,9 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
         gluPerspective(45.0, (self.width) / float(self.height), 0.1, 1000.0)    # Defines the parameters of the viewing volume
         glMatrixMode(GL_MODELVIEW)                                              # Specifies matrix stack that will be used for subsequent matrix operations. GL_MODELVIEW is responsible for transforming the camera and models relative to each other
 
-        # Draw the circular disk (short cylinder)
-        cylinderColor = (159.0 / 255.0,226.0 / 255.0,191.0 / 255.0,0.8)                     # Translucent Jade
-        self.draw_cylinder(radius=150, height=3, slices=50, stacks=1, color=cylinderColor)  # Call the draw_cylinder method
+        # Draw the rectangular build plate
+        bedColor = (159.0 / 255.0,226.0 / 255.0,191.0 / 255.0,0.8)                          # Translucent Jade
+        self.draw_build_plate(width=200, depth=200, height=3, color=bedColor)
 
         """ Update STL variables """
         if (B_selectFile.D_variables != {}):                                                        # If the user has selected to open any STL files
@@ -441,7 +441,7 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
             colors = self.Render_SlicePlanes.colors
             for k in range(numSlicingDirections):
                 if k != 0:                                      # Skip the initial plane, since the initial slice direction is always normal to the build plate
-                    isValid = D_slicePlaneValidity[str(k)]
+                    isValid = D_slicePlaneValidity.get(str(k), True)
                     startX = startingPositions[k][0]
                     startY = startingPositions[k][1]
                     startZ = startingPositions[k][2]
@@ -681,6 +681,84 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
             GL_FRONT_AND_BACK, GL_SPECULAR, (GLfloat * 4)(*cylinderMaterialSpecular)
         )
         glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, cylinderMaterialShininess)
+
+    @staticmethod
+    def draw_build_plate(width, depth, height, color):
+        glEnable(GL_COLOR_MATERIAL)
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+        glColor4f(*color)
+
+        hw = width / 2.0
+        hd = depth / 2.0
+
+        glPushMatrix()
+        glTranslatef(0, 0, -height)
+
+        # Top face
+        glBegin(GL_QUADS)
+        glNormal3f(0, 0, 1)
+        glVertex3f(-hw, -hd, height)
+        glVertex3f( hw, -hd, height)
+        glVertex3f( hw,  hd, height)
+        glVertex3f(-hw,  hd, height)
+        glEnd()
+
+        # Bottom face
+        glBegin(GL_QUADS)
+        glNormal3f(0, 0, -1)
+        glVertex3f(-hw, -hd, 0)
+        glVertex3f(-hw,  hd, 0)
+        glVertex3f( hw,  hd, 0)
+        glVertex3f( hw, -hd, 0)
+        glEnd()
+
+        # Front face
+        glBegin(GL_QUADS)
+        glNormal3f(0, -1, 0)
+        glVertex3f(-hw, -hd, 0)
+        glVertex3f( hw, -hd, 0)
+        glVertex3f( hw, -hd, height)
+        glVertex3f(-hw, -hd, height)
+        glEnd()
+
+        # Back face
+        glBegin(GL_QUADS)
+        glNormal3f(0, 1, 0)
+        glVertex3f(-hw, hd, 0)
+        glVertex3f(-hw, hd, height)
+        glVertex3f( hw, hd, height)
+        glVertex3f( hw, hd, 0)
+        glEnd()
+
+        # Left face
+        glBegin(GL_QUADS)
+        glNormal3f(-1, 0, 0)
+        glVertex3f(-hw, -hd, 0)
+        glVertex3f(-hw, -hd, height)
+        glVertex3f(-hw,  hd, height)
+        glVertex3f(-hw,  hd, 0)
+        glEnd()
+
+        # Right face
+        glBegin(GL_QUADS)
+        glNormal3f(1, 0, 0)
+        glVertex3f(hw, -hd, 0)
+        glVertex3f(hw,  hd, 0)
+        glVertex3f(hw,  hd, height)
+        glVertex3f(hw, -hd, height)
+        glEnd()
+
+        glPopMatrix()
+
+        # Material properties
+        plateMaterialDiffuse = (0.8, 0.8, 0.8, 0.5)
+        plateMaterialAmbient = (0.2, 0.2, 0.2, 0.5)
+        plateMaterialSpecular = (0.2, 0.2, 0.2, 0.5)
+        plateMaterialShininess = 10.0
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, (GLfloat * 4)(*plateMaterialDiffuse))
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (GLfloat * 4)(*plateMaterialAmbient))
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (GLfloat * 4)(*plateMaterialSpecular))
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, plateMaterialShininess)
 
     @staticmethod
     def is_cursor_over_widget(widget, x, y):

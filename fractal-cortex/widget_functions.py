@@ -68,7 +68,7 @@ retractionSpeed = 20.0
 enableSupports = False
 enableBrim = False
 
-buildPlateBounds = [-150, 150]
+buildPlateBounds = [-100, 100]
 zBounds = [0, 300]
 rotateBounds = [-720, 720]
 scaleBounds = [1, 1000]
@@ -560,6 +560,9 @@ def checkSlicePlaneValidity():
     '''
     Second, get points from mesh Sections and extract their Z values
     '''
+    meshSections = [s for s in meshSections if s is not None]
+    if not meshSections:
+        return {}
     sectionPoints = [section.vertices for section in meshSections]
     sectionZValuesBySlicePlane = [[point[2] for point in section] for section in sectionPoints]
 
@@ -1169,9 +1172,9 @@ r3c1GeometryActionDeck = glooey.Deck(
     ),
     rotate=Entry_Box(str(rotateY), rotateBounds[0], rotateBounds[1], "°CCW"),
     scale=Unlabeled_Image_Button(
-        "image_resources/apply_Button_Images/Base.png",
-        "image_resources/apply_Button_Images/Over.png",
-        "image_resources/apply_Button_Images/Down.png",
+        "image_resources/apply_Button_Images/base.png",
+        "image_resources/apply_Button_Images/over.png",
+        "image_resources/apply_Button_Images/down.png",
         apply_placeholder,
         [],
     ),
@@ -1188,9 +1191,9 @@ r4c1GeometryActionDeck = glooey.Deck(
     blank=Widget_Label(""),
     translate=Entry_Box(str(translateZ), zBounds[0], zBounds[1], "mm"),
     rotate=Unlabeled_Image_Button(
-        "image_resources/apply_Button_Images/Base.png",
-        "image_resources/apply_Button_Images/Over.png",
-        "image_resources/apply_Button_Images/Down.png",
+        "image_resources/apply_Button_Images/base.png",
+        "image_resources/apply_Button_Images/over.png",
+        "image_resources/apply_Button_Images/down.png",
         apply_placeholder,
         [],
     ),
