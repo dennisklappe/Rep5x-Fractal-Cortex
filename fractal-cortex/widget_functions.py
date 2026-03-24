@@ -25,7 +25,7 @@ from pyglet import event
 from pyglet.window import key
 import glooey
 from glooey import drawing
-from tkinter import filedialog
+import subprocess
 import os
 from glooey.helpers import *
 from fractal_widgets import *
@@ -454,7 +454,7 @@ def save_gcode_as(fileName):
     else:
         stlFileName = "new_file"
 
-    newFile = filedialog.asksaveasfilename(initialdir=desktopDirectory, title="Save Gcode File As...", defaultextension=".gcode", filetypes=(("gcode File", "*.gcode*"), ("Text Document", "*.txt")), initialfile=stlFileName)
+    newFile = _native_save_dialog("Save Gcode File As...", desktopDirectory, stlFileName + ".gcode", "*.gcode")
 
     print(newFile)
 
@@ -494,17 +494,68 @@ def save_gcode_as(fileName):
                 chunk_optimizedSolidInfills
             )
 
+def _native_open_dialog(title, file_filter, initial_dir):
+    """Try native file dialog via zenity/kdialog, fall back to tkinter."""
+    try:
+        result = subprocess.run(
+            ["zenity", "--file-selection", "--title=" + title,
+             "--file-filter=" + file_filter,
+             "--filename=" + initial_dir + "/"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return ""
+    except FileNotFoundError:
+        pass
+    try:
+        result = subprocess.run(
+            ["kdialog", "--getopenfilename", initial_dir, file_filter, "--title", title],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return ""
+    except FileNotFoundError:
+        pass
+    from tkinter import filedialog
+    return filedialog.askopenfilename(initialdir=initial_dir, title=title,
+        filetypes=(("STL Files", "*.stl"), ("All Files", "*.*")))
+
+def _native_save_dialog(title, initial_dir, default_name, file_filter):
+    """Try native save dialog via zenity/kdialog, fall back to tkinter."""
+    try:
+        result = subprocess.run(
+            ["zenity", "--file-selection", "--save", "--confirm-overwrite",
+             "--title=" + title, "--file-filter=" + file_filter,
+             "--filename=" + initial_dir + "/" + default_name],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return ""
+    except FileNotFoundError:
+        pass
+    try:
+        result = subprocess.run(
+            ["kdialog", "--getsavefilename", initial_dir + "/" + default_name, file_filter, "--title", title],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return ""
+    except FileNotFoundError:
+        pass
+    from tkinter import filedialog
+    return filedialog.asksaveasfilename(initialdir=initial_dir, title=title,
+        defaultextension=".gcode", filetypes=(("gcode File", "*.gcode"), ("Text Document", "*.txt")),
+        initialfile=default_name)
+
 fileKey = 0  # Keeps track of which file has been opened
 def select_file():      # Called when the user clicks the file select button
     global selectedNewFile, fileKey
-    desktopDirectory = os.path.join(
-        os.path.expanduser("~"), "Desktop"
-    )
-    fileName = filedialog.askopenfilename(
-        initialdir=desktopDirectory,
-        title="Select an STL File",
-        filetypes=(("STL Files", "*.stl"), ("All Files", "*.*")),
-    )
+    homeDirectory = os.path.expanduser("~")
+    fileName = _native_open_dialog("Select an STL File", "*.stl", homeDirectory)
 
     if fileName:        # If a file has been selected
         B_selectFile.D_variables[fileKey] = (
