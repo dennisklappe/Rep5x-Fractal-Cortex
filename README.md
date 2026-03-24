@@ -1,26 +1,35 @@
-# Fractal Cortex
+# Fractal Cortex (Rep5x Fork)
 
 <img src="./examples/fractal_robotics_logo.png" width="150">
 
-Fractal Cortex is an open source multidirectional 5-axis FDM slicer developed by **Fractal Robotics**.
+This is a fork of [Fractal Cortex](https://github.com/fractalrobotics/Fractal-Cortex), an open source multidirectional 5-axis FDM slicer by **Fractal Robotics**, adapted for use with [Rep5x](https://github.com/dennisklappe/Rep5x) 5-axis printers running Marlin firmware.
 
-⚙️ An open-source benchtop 5-axis 3D printer was developed to go along with this slicer. You can check out [the GitHub page for it here](https://github.com/fractalrobotics/Fractal-5-Pro).
+## What's changed from upstream
+
+- G-code output targets Rep5x Marlin instead of Klipper (G43.4 IK, M667 calibration, B/C axes)
+- 200x200mm rectangular build plate instead of circular
+- G-code coordinates offset to bed center for Marlin origin-at-corner convention
+- Linux compatibility fixes (case-sensitive paths, native file dialogs)
 
 <p align="center">
   <img src="./examples/GUI_Prepare_Screenshot.PNG" width="700">
 </p>
 
-# 💻System Requirements
-- OS: Windows 10
-- Python: 3.10.11
+# System Requirements
+- OS: Windows / Linux
+- Python: 3.10+
 - Python Libraries:
-  - glooey 0.3.6
-  - numpy 1.26.4
-  - numpy-stl 3.1.1
+  - glooey
+  - numpy
+  - numpy-stl
   - pyglet 1.5.28
-  - pyOpenGL 3.1.0
-  - shapely 2.0.4
-  - trimesh 4.3.1
+  - pyOpenGL
+  - shapely
+  - trimesh
+  - scipy
+  - rtree
+  - networkx
+  - mapbox-earcut
 
 # 📘User Guide
 Fractal Cortex is a multidirectional 5-axis FDM slicer that is backwards compatible with 3-axis slicing. To minimize the learning curve, many aspects of this slicer were designed to feel familiar to the user experience of traditional 3-axis slicers. This overview will primarily cover the important differences that make Fractal Cortex unique.
@@ -36,7 +45,7 @@ Multidirectional 5-axis slicing is a technique in which a 3D model is divided in
 **5-Axis Mode**
 
 To slice a part (or multiple parts) in 5 axes, follow the instructions below:
-1. Assuming you've downloaded the source code to your local computer, open Fractal Cortex by right clicking on "slicer_main.py". Select "Edit with IDLE" > "Edit with IDLE 3.10 (64 Bit)". Once the file is open, run it by pressing F5. The window shown below should appear. Notice that 5-Axis Mode is selected by default.
+1. Clone the repo and install dependencies in a virtual environment (`pip install -r requirements.txt` or install the libraries listed above). Run `python fractal-cortex/slicer_main.py` from the repo root. The window shown below should appear. Notice that 5-Axis Mode is selected by default.
 
 <p align="center">
 <img src="./examples/Step_1.PNG" width="500">
