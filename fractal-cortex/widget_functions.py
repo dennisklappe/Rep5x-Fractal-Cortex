@@ -50,17 +50,17 @@ rotateY = 0.0
 rotateZ = 0.0
 scaleFactor = 100.0
 
-nozzleTemp = 200.0
+nozzleTemp = 210.0          # PLA per Rep5x vase generator preset
 initialNozzleTemp = nozzleTemp + 5.0
 bedTemp = 60.0
 initialBedTemp = bedTemp + 5.0
 infillPercentage = 20.0
 shellThickness = 3
-layerHeight = 0.3
-printSpeed = 100.0
-initialPrintSpeed = printSpeed - 50.0
-travelSpeed = 150.0
-initialTravelSpeed = travelSpeed - 50.0
+layerHeight = 0.2           # 0.4mm nozzle → lineWidth auto = 0.4mm (= layerHeight * 2)
+printSpeed = 50.0           # Rep5x vase generator PLA preset
+initialPrintSpeed = 25.0
+travelSpeed = 100.0
+initialTravelSpeed = 50.0
 enableZHop = True
 enableRetraction = True
 retractionDistance = 1.0
