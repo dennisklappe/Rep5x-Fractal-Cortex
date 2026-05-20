@@ -1173,18 +1173,24 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
 
     def transform_paths_to_printable_orientation(layer_paths, transformation_matrices):  # Works with both linearrings and linestrings
         """
-        Convert a list of layers (each containing multiple LineStrings or LinearRings) to 3D line segments,
-        applying the appropriate transformation matrix for each layer.
-        Returns per-point (x, y, z) in part frame so tilted slice planes print as tilted layers
-        on a head-tilt Rep5x machine; Marlin G43.4 applies pivot-offset compensation at print time."""
+        Convert layers of 2D paths to per-point (x, y, z) in part frame, offset by
+        +0.5*layerHeight along the slice-plane normal so the emitted Z is the nozzle
+        position (top of the slab) rather than the slice plane (middle of the slab).
+        Tilted slice planes thus print as tilted layers on a head-tilt Rep5x machine;
+        Marlin G43.4 applies pivot-offset compensation at print time."""
 
         printable_pathPoints = []
 
         for layer_idx, (paths, transform) in enumerate(zip(layer_paths, transformation_matrices)):
             layerPaths = []
+            if transform.shape == (4, 4):
+                normal = transform[:3, 2]  # slice-plane normal in part frame
+                offset = 0.5 * layerHeight * normal
+            else:
+                offset = np.zeros(3)
             for path in paths:
                 coords_2d = np.array(path.coords)
-                coords_3d = np.array([transform_point(point, transform) for point in coords_2d])
+                coords_3d = np.array([transform_point(point, transform) + offset for point in coords_2d])
 
                 layerPaths.append([(point[0], point[1], point[2]) for point in coords_3d])
             printable_pathPoints.append(layerPaths)
@@ -1192,18 +1198,20 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
         return printable_pathPoints
 
     def transform_infill_paths_to_printable_orientation(layer_paths, transformation_matrices):  # Works with both linearrings and linestrings
-        """
-        Convert a list of layers (each containing multiple LineStrings or LinearRings) to 3D line segments,
-        applying the appropriate transformation matrix for each layer.
-        Returns per-point (x, y, z) in part frame; see transform_paths_to_printable_orientation."""
+        """Same Z-offset convention as transform_paths_to_printable_orientation."""
 
         printable_pathPoints = []
 
         for layer_idx, (paths, transform) in enumerate(zip(layer_paths, transformation_matrices)):
             layerPaths = []
+            if transform.shape == (4, 4):
+                normal = transform[:3, 2]
+                offset = 0.5 * layerHeight * normal
+            else:
+                offset = np.zeros(3)
             for line in paths:
                 coords_2d = np.array(line[0].coords)
-                coords_3d = np.array([transform_point(point, transform) for point in coords_2d])
+                coords_3d = np.array([transform_point(point, transform) + offset for point in coords_2d])
 
                 layerPaths.append([(point[0], point[1], point[2]) for point in coords_3d])
             printable_pathPoints.append(layerPaths)
