@@ -1128,44 +1128,32 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
     BED_CENTER_Y = 100.0  # half of 200mm bed
 
     def transcribe_pathPoints_to_gcode(pathPoints, PRINT_FEEDRATE, runOnce, newChunk):
-        global E, previousE
-
         for p in range(len(pathPoints)):
             point = pathPoints[p]
             X = round(point[0] + BED_CENTER_X, 5)
             Y = round(point[1] + BED_CENTER_Y, 5)
-            if p == 0:  # If it's the first point in the path
+            Z = round(point[2], 5) if len(point) >= 3 else round(nozzleHeight, 5)
+            if p == 0:  # First point in the path: position only, no extrusion
                 if enableRetraction == True:
-                    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - retractionDistance, 5)) + " ; Retraction" + "\n")
+                    openFile.write("G1 F" + str(E_FEEDRATE) + " E-" + str(round(retractionDistance, 5)) + " ; Retraction\n")
                 if enableZHop == True:
-                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + layerHeight, 5)) + "\n")
+                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(Z + layerHeight, 5)) + "\n")
                 if newChunk == True:
-                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + 30.0 + layerHeight, 5)) + "\n")
+                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(Z + 30.0 + layerHeight, 5)) + "\n")
                     newChunk = False
-                if runOnce == True:  # If both the G0 and G1 feedrate for this feature hasn't yet been set on this layer
-                    openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
-                else:  # If it's the first point in the path and G0 and G1 feedrates have already been set
-                    openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n") # ("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
-                    if enableZHop == True:
-                        openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight, 5)) + "\n")
-                    if enableRetraction == True:
-                        openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E, 5)) + " ; Reversed Retraction" + "\n")
-            else:  # If it's any point other than the first point in the path
-                s = ((X - previousX) ** 2 + (Y - previousY) ** 2) ** 0.5  # Calculate Euclidian distance
-                E += ((4.0 * layerHeight * lineWidth * s) / (np.pi * (1.75**2)))  # Use conservation of mass to determine length of 1.75mm filament to extrude
-                if runOnce == True:  # If both the G0 and G1 feedrate for this feature hasn't yet been set on this layer
-                    if enableZHop == True:
-                        openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z"+ str(round(nozzleHeight, 5)) + "\n")
-                    if enableRetraction == True:
-                        openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(previousE, 5)) + " ; Reversed Retraction" + "\n")
-                    openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y"+ str(Y) + " E" + str(round(E, 5)) + "\n")
-                    runOnce = False
-                else:  # If it's the second (or any following) points on the path and the G0 and G1 feedrates have already been set
-                    openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y"+ str(Y) + " E" + str(round(E, 5)) + "\n") # ("G1 X" + str(X) + " Y" + str(Y) + " E" + str(round(E, 5)) + "\n")
-                previousE = E
+                openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
+                openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(Z) + "\n")
+                if enableRetraction == True:
+                    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(retractionDistance, 5)) + " ; Reverse retract\n")
+                runOnce = False
+            else:  # Subsequent points: emit delta E (relative extrusion under M83)
+                s = ((X - previousX) ** 2 + (Y - previousY) ** 2 + (Z - previousZ) ** 2) ** 0.5  # 3D Euclidian distance
+                dE = (4.0 * layerHeight * lineWidth * s) / (np.pi * (1.75**2))
+                openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + " Z" + str(Z) + " E" + str(round(dE, 5)) + "\n")
 
             previousX = X
             previousY = Y
+            previousZ = Z
 
     def rotate_coordinates(coords, phi):
         """Rotate 2D coordinates about the Z-axis by a given angle."""
@@ -1183,54 +1171,41 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
         rotated_coords = coords_array @ rotation_matrix.T
         return rotated_coords
 
-    def transform_paths_to_printable_orientation(layer_paths, transformation_matrices, DCM_AB):  # Works with both linearrings and linestrings
+    def transform_paths_to_printable_orientation(layer_paths, transformation_matrices):  # Works with both linearrings and linestrings
         """
         Convert a list of layers (each containing multiple LineStrings or LinearRings) to 3D line segments,
-        applying the appropriate transformation matrix for each layer."""
-        
+        applying the appropriate transformation matrix for each layer.
+        Returns per-point (x, y, z) in part frame so tilted slice planes print as tilted layers
+        on a head-tilt Rep5x machine; Marlin G43.4 applies pivot-offset compensation at print time."""
+
         printable_pathPoints = []
-        midLayer_Z_Heights = []
 
         for layer_idx, (paths, transform) in enumerate(zip(layer_paths, transformation_matrices)):
             layerPaths = []
-            # Handle each path in the current layer
             for path in paths:
-                
-                # Get 2D coordinates from the path
                 coords_2d = np.array(path.coords)
-
-                # Transform each point in the path
                 coords_3d = np.array([transform_point(point, transform) for point in coords_2d])
-                
-                printable_coords_3d = np.array([np.matmul(DCM_AB, point3D) for point3D in coords_3d])
 
-                layerPaths.append([(point[0], point[1]) for point in printable_coords_3d])
+                layerPaths.append([(point[0], point[1], point[2]) for point in coords_3d])
             printable_pathPoints.append(layerPaths)
-            midLayer_Z_Heights.append(printable_coords_3d[0][2])
 
-        return printable_pathPoints, midLayer_Z_Heights
+        return printable_pathPoints
 
-    def transform_infill_paths_to_printable_orientation(layer_paths, transformation_matrices, DCM_AB):  # Works with both linearrings and linestrings
+    def transform_infill_paths_to_printable_orientation(layer_paths, transformation_matrices):  # Works with both linearrings and linestrings
         """
         Convert a list of layers (each containing multiple LineStrings or LinearRings) to 3D line segments,
-        applying the appropriate transformation matrix for each layer."""
-        
+        applying the appropriate transformation matrix for each layer.
+        Returns per-point (x, y, z) in part frame; see transform_paths_to_printable_orientation."""
+
         printable_pathPoints = []
 
         for layer_idx, (paths, transform) in enumerate(zip(layer_paths, transformation_matrices)):
             layerPaths = []
-            # Handle each path in the current layer
             for line in paths:
-                
-                # Get 2D coordinates from the line
                 coords_2d = np.array(line[0].coords)
-
-                # Transform each point in the line
                 coords_3d = np.array([transform_point(point, transform) for point in coords_2d])
-                
-                printable_coords_3d = np.array([np.matmul(DCM_AB, point3D) for point3D in coords_3d])
 
-                layerPaths.append([(point[0], point[1]) for point in printable_coords_3d])
+                layerPaths.append([(point[0], point[1], point[2]) for point in coords_3d])
             printable_pathPoints.append(layerPaths)
 
         return printable_pathPoints
@@ -1299,9 +1274,7 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
     openFile.write(";--------------------------\n")
     openFile.write(";PRINT SETTINGS:\n")
     openFile.write(";--------------------------\n")
-    openFile.write(";initialNozzleTemp:   " + str(initialNozzleTemp) + "\n")
     openFile.write(";nozzleTemp:          " + str(nozzleTemp) + "\n")
-    openFile.write(";initialBedTemp:      " + str(initialBedTemp) + "\n")
     openFile.write(";bedTemp:             " + str(bedTemp) + "\n")
     openFile.write(";infillPercentage:    " + str(infillPercentage) + "\n")
     openFile.write(";shellThickness:      " + str(shellThickness) + "\n")
@@ -1319,28 +1292,48 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
     openFile.write(";enableSupports:      " + str(enableSupports) + "\n")
     openFile.write(";enableBrim:          " + str(enableBrim) + "\n")
     openFile.write(";--------------------------\n")
-    openFile.write("G49                   ;Disable IK during homing\n")
-    openFile.write("M667 S0               ;Disable calibration during homing\n")
-    openFile.write("G28                   ;Home all axes\n")
-    openFile.write("G1 Z5 F300            ;Lift Z\n")
-    openFile.write("M104 S" + str(initialNozzleTemp) + "           ;Set initial nozzle temperature\n")
-    openFile.write("M140 S" + str(initialBedTemp) + "            ;Set initial bed temp\n")
-    openFile.write("M190 S" + str(initialBedTemp) + "            ;Wait for bed temp\n")
-    openFile.write("M109 S" + str(initialNozzleTemp) + "           ;Wait for nozzle temp\n")
-    openFile.write("G92 E0                ;Reset extruder position\n")
-    openFile.write("G21                   ;Set units to millimeters\n")
-    openFile.write("G90                   ;Use absolute coordinates\n")
-    openFile.write("M82                   ;Absolute extrusion mode\n")
-    openFile.write("G43.4                 ;Enable inverse kinematics\n")
-    openFile.write("M667 S1               ;Enable calibration\n")
+    openFile.write("\n")
+    openFile.write("; Start sequence\n")
+    openFile.write("G49 ;Disable IK during homing\n")
+    openFile.write("M667 S0 ;Disable calibration during homing\n")
+    openFile.write("M220 S100 ;Reset Feedrate\n")
+    openFile.write("M221 S100 ;Reset Flowrate\n")
+    openFile.write("\n")
+    openFile.write("M104 S" + str(nozzleTemp) + " ;Start heating nozzle\n")
+    openFile.write("M140 S" + str(bedTemp) + " ;Start heating bed\n")
+    openFile.write("M190 S" + str(bedTemp) + " ;Wait for bed temp\n")
+    openFile.write("\n")
+    openFile.write("G28 X ;Home X first to avoid cable blocking Z\n")
+    openFile.write("G28 ;Home all axes\n")
+    openFile.write("G91 ;Relative positioning\n")
+    openFile.write("G0 Z-20 F3000 ;Move Z down 20mm for bowden tube alignment\n")
+    openFile.write("G90 ;Absolute positioning\n")
+    openFile.write("G0 C0 B0 F3000 ;Move rotational axes to 0\n")
+    openFile.write("\n")
+    openFile.write("; Purge line\n")
+    openFile.write("G92 E0 ;Reset Extruder\n")
+    openFile.write("G1 Z2.0 F3000 ;Lift Z\n")
+    openFile.write("G1 X-2 Y20 Z0.28 F600 ;Move to purge start\n")
+    openFile.write("M109 S" + str(nozzleTemp) + " ;Wait for nozzle temp\n")
+    openFile.write("G1 X-2 Y145.0 Z0.28 F1500.0 E15 ;Draw first purge line\n")
+    openFile.write("G1 X-1.7 Y145.0 Z0.28 F5000.0 ;Shift sideways\n")
+    openFile.write("G1 X-1.7 Y20 Z0.28 F1500.0 E30 ;Draw second purge line\n")
+    openFile.write("G92 E0 ;Reset Extruder\n")
+    openFile.write("G1 E-1.0000 F1800 ;Retract\n")
+    openFile.write("G1 Z2.0 F3000 ;Lift Z\n")
+    openFile.write("G1 E0.0000 F1800 ;Reverse retract\n")
+    openFile.write("\n")
+    openFile.write("; Set bed centre as origin and enable IK\n")
+    openFile.write("G0 X100 Y100 F2400 ;Move to centre\n")
+    openFile.write("G92 X100 Y100 B0 C0 ;Set bed centre as origin (0,0) and zero rotation axes\n")
+    openFile.write("M211 S0 ;Disable software endstops\n")
+    openFile.write("M83 ;Relative extrusion\n")
+    openFile.write("G43.4 ;Enable live IK\n")
+    openFile.write("M667 S1 ;Enable calibration\n")
     openFile.write(";END OF HEADER\n")
 
     """ BODY """
     numChunks = len(chunk_transform3DList)
-
-    global E, previousE
-    E = 0  # Cumulative length of 1.75mm diameter filament used at every line of G-Code
-    previousE = 0
 
     for key in chunk_transform3DList: # For each chunk
         openFile.write(";" + "Chunk " + key + "\n")
@@ -1348,10 +1341,6 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
         shellRingsListList = chunk_shellRingsListList[key]
         optimizedSolidInfills = chunk_optimizedSolidInfills[key]
         optimizedInternalInfills = chunk_optimizedInternalInfills[key]
-
-        theta = BMOVE_Degrees[int(key)]*(np.pi/180.0)
-        phi = AMOVE_Degrees[int(key)]*(np.pi/180.0)
-        DCM_AB = np.eye(3) 
 
         if key != '0': # If it's not the initial chunk, reorient B and C axes
             newChunk = True
@@ -1365,16 +1354,12 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
                 openFile.write(";No B/C reorientation needed\n")
 
             openFile.write(";B & C axis reorientation complete\n")
-            
-            QA = np.array([[np.cos(phi), -np.sin(phi), 0], [np.sin(phi), np.cos(phi), 0], [0, 0, 1]])
-            QB = np.array([[1, 0, 0], [0, np.cos(theta), -np.sin(theta)], [0, np.sin(theta), np.cos(theta)]])
-            DCM_AB = np.matmul(QB, QA)
         elif key == '0':
             newChunk = False
 
-        printable_shell_pathPoints, midLayer_Z_Heights = transform_paths_to_printable_orientation(shellRingsListList, transform3DList, DCM_AB)
-        printable_solidInfill_pathPoints = transform_infill_paths_to_printable_orientation(optimizedSolidInfills, transform3DList, DCM_AB)
-        printable_internalInfill_pathPoints = transform_infill_paths_to_printable_orientation(optimizedInternalInfills, transform3DList, DCM_AB)
+        printable_shell_pathPoints = transform_paths_to_printable_orientation(shellRingsListList, transform3DList)
+        printable_solidInfill_pathPoints = transform_infill_paths_to_printable_orientation(optimizedSolidInfills, transform3DList)
+        printable_internalInfill_pathPoints = transform_infill_paths_to_printable_orientation(optimizedInternalInfills, transform3DList)
 
         numLayers = len(transform3DList)
         for k in range(numLayers):  # For each layer
@@ -1396,10 +1381,7 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
             current3DTransform = transform3DList[k]
 
             if current3DTransform.shape == (4, 4):  # If there is something to print at this layer, do so. Otherwise, there is a vertical gap underneath a floating island in which G-Code shouldn't be generated
-                nozzleHeight = midLayer_Z_Heights[k] + 0.5 * layerHeight # Current height of nozzle
-
-                """ Z COMMAND """
-                openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight, 5)) + "\n")
+                nozzleHeight = current3DTransform[2][3] + 0.5 * layerHeight # Reference Z for adhesion (2D points) and zHop math; per-point Z handles tilted layers
 
                 if key == '0' and k == 0 and adhesionList[0] != []: # If it's layer zero of the initial chunk and there is adhesion gcode (brims, skirts) to write, do so
                     """ ADHESION FEATURE TITLE """
@@ -1467,16 +1449,27 @@ def write_5_axis_gcode(newFile, savedFileName, printSettings, startingPositions,
 
 
     """ FOOTER """
-    openFile.write(";FOOTER:\n")
-    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - 2.0, 5)) + " ;Retract for end of print\n")
-    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + 10.0, 5)) + " ;Lift\n")
-    openFile.write("G49                   ;Disable IK\n")
-    openFile.write("M667 S0               ;Disable calibration\n")
-    openFile.write("G28 X Y               ;Home X Y\n")
-    openFile.write("M104 S0               ;Turn off hotend\n")
-    openFile.write("M140 S0               ;Turn off bed\n")
-    openFile.write("M84                   ;Disable motors\n")
-    openFile.write(";End of GCODE\n")
+    openFile.write("\n")
+    openFile.write("; End sequence\n")
+    openFile.write("G91 ;Relative positioning\n")
+    openFile.write("G1 E-2 F2700 ;Retract\n")
+    openFile.write("G1 E-2 Z0.2 F2400 ;Retract and raise Z\n")
+    openFile.write("G1 X5 Y5 F3000 ;Wipe out\n")
+    openFile.write("G90 ;Absolute positioning\n")
+    openFile.write("\n")
+    openFile.write("G49 ;Disable IK before homing\n")
+    openFile.write("M667 S0 ;Disable calibration\n")
+    openFile.write("G28 Z ;Home Z to max height\n")
+    openFile.write("G4 P1000 ;Wait for Z to settle\n")
+    openFile.write("\n")
+    openFile.write("G0 X110 Y200 ;Move bed to back for easy part removal\n")
+    openFile.write("G0 C0 B0 ;Return rotational axes to 0\n")
+    openFile.write("\n")
+    openFile.write("M106 S0 ;Turn off fan\n")
+    openFile.write("M104 S0 ;Turn off hotend\n")
+    openFile.write("M140 S0 ;Turn off bed\n")
+    openFile.write("\n")
+    openFile.write("M84 X Y E C B ;Disable all steppers except Z\n")
 
     openFile.close()
 
@@ -1488,38 +1481,25 @@ def write_3_axis_gcode(newFile, savedFileName, printSettings, transform3DList, a
     BED_CENTER_Y = 100.0  # half of 200mm bed
 
     def transcribe_pathPoints_to_gcode(pathPoints, PRINT_FEEDRATE, runOnce):
-        global E, previousE
-
         for p in range(len(pathPoints)):
             point = pathPoints[p]
             X = round(point[0] + BED_CENTER_X, 5)
             Y = round(point[1] + BED_CENTER_Y, 5)
-            if p == 0:  # If it's the first point in the path
+            if p == 0:  # First point in the path: position only, no extrusion
                 if enableRetraction == True:
-                    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - retractionDistance, 5)) + " ; Retraction" + "\n")
+                    openFile.write("G1 F" + str(E_FEEDRATE) + " E-" + str(round(retractionDistance, 5)) + " ; Retraction\n")
                 if enableZHop == True:
-                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + layerHeight, 5)) + "\n")                    
-                if runOnce == True:  # If both the G0 and G1 feedrate for this feature hasn't yet been set on this layer
-                    openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
-                else:  # If it's the first point in the path and G0 and G1 feedrates have already been set
-                    openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n") # ("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
-                    if enableZHop == True:
-                        openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight, 5)) + "\n")
-                    if enableRetraction == True:
-                        openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E, 5)) + " ; Reversed Retraction" + "\n")
-            else:  # If it's any point other than the first point in the path
+                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + layerHeight, 5)) + "\n")
+                openFile.write("G0 F" + str(G0XY_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + "\n")
+                if enableZHop == True:
+                    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight, 5)) + "\n")
+                if enableRetraction == True:
+                    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(retractionDistance, 5)) + " ; Reverse retract\n")
+                runOnce = False
+            else:  # Subsequent points: emit delta E (relative extrusion under M83)
                 s = ((X - previousX) ** 2 + (Y - previousY) ** 2) ** 0.5  # Calculate Euclidian distance
-                E += ((4.0 * layerHeight * lineWidth * s) / (np.pi * (1.75**2)))  # Use conservation of mass to determine length of 1.75mm filament to extrude
-                if runOnce == True:  # If both the G0 and G1 feedrate for this feature hasn't yet been set on this layer
-                    if enableZHop == True:
-                        openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z"+ str(round(nozzleHeight, 5)) + "\n")
-                    if enableRetraction == True:
-                        openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(previousE, 5)) + " ; Reversed Retraction" + "\n")
-                    openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y"+ str(Y) + " E" + str(round(E, 5)) + "\n")
-                    runOnce = False
-                else:  # If it's the second (or any following) points on the path and the G0 and G1 feedrates have already been set
-                    openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y"+ str(Y) + " E" + str(round(E, 5)) + "\n") # ("G1 X" + str(X) + " Y" + str(Y) + " E" + str(round(E, 5)) + "\n")
-                previousE = E
+                dE = (4.0 * layerHeight * lineWidth * s) / (np.pi * (1.75**2))
+                openFile.write("G1 F" + str(PRINT_FEEDRATE) + " X" + str(X) + " Y" + str(Y) + " E" + str(round(dE, 5)) + "\n")
 
             previousX = X
             previousY = Y
@@ -1563,9 +1543,7 @@ def write_3_axis_gcode(newFile, savedFileName, printSettings, transform3DList, a
     openFile.write(";--------------------------\n")
     openFile.write(";PRINT SETTINGS:\n")
     openFile.write(";--------------------------\n")
-    openFile.write(";initialNozzleTemp:   " + str(initialNozzleTemp) + "\n")
     openFile.write(";nozzleTemp:          " + str(nozzleTemp) + "\n")
-    openFile.write(";initialBedTemp:      " + str(initialBedTemp) + "\n")
     openFile.write(";bedTemp:             " + str(bedTemp) + "\n")
     openFile.write(";infillPercentage:    " + str(infillPercentage) + "\n")
     openFile.write(";shellThickness:      " + str(shellThickness) + "\n")
@@ -1583,26 +1561,43 @@ def write_3_axis_gcode(newFile, savedFileName, printSettings, transform3DList, a
     openFile.write(";enableSupports:      " + str(enableSupports) + "\n")
     openFile.write(";enableBrim:          " + str(enableBrim) + "\n")
     openFile.write(";--------------------------\n")
-    openFile.write("G28                   ;Home all axes\n")
-    openFile.write("G1 Z5 F300            ;Lift Z\n")
-    openFile.write("M104 S" + str(initialNozzleTemp) + "           ;Set initial nozzle temperature\n")
-    openFile.write("M140 S" + str(initialBedTemp) + "            ;Set initial bed temp\n")
-    openFile.write("M190 S" + str(initialBedTemp) + "            ;Wait for bed temp\n")
-    openFile.write("M109 S" + str(initialNozzleTemp) + "           ;Wait for nozzle temp\n")
-    openFile.write("G92 E0                ;Reset extruder position\n")
-    openFile.write("G21                   ;Set units to millimeters\n")
-    openFile.write("G90                   ;Use absolute coordinates\n")
-    openFile.write("M82                   ;Absolute extrusion mode\n")
+    openFile.write("\n")
+    openFile.write("; Start sequence\n")
+    openFile.write("M220 S100 ;Reset Feedrate\n")
+    openFile.write("M221 S100 ;Reset Flowrate\n")
+    openFile.write("\n")
+    openFile.write("M104 S" + str(nozzleTemp) + " ;Start heating nozzle\n")
+    openFile.write("M140 S" + str(bedTemp) + " ;Start heating bed\n")
+    openFile.write("M190 S" + str(bedTemp) + " ;Wait for bed temp\n")
+    openFile.write("\n")
+    openFile.write("G28 X ;Home X first to avoid cable blocking Z\n")
+    openFile.write("G28 ;Home all axes\n")
+    openFile.write("G91 ;Relative positioning\n")
+    openFile.write("G0 Z-20 F3000 ;Move Z down 20mm for bowden tube alignment\n")
+    openFile.write("G90 ;Absolute positioning\n")
+    openFile.write("\n")
+    openFile.write("; Purge line\n")
+    openFile.write("G92 E0 ;Reset Extruder\n")
+    openFile.write("G1 Z2.0 F3000 ;Lift Z\n")
+    openFile.write("G1 X-2 Y20 Z0.28 F600 ;Move to purge start\n")
+    openFile.write("M109 S" + str(nozzleTemp) + " ;Wait for nozzle temp\n")
+    openFile.write("G1 X-2 Y145.0 Z0.28 F1500.0 E15 ;Draw first purge line\n")
+    openFile.write("G1 X-1.7 Y145.0 Z0.28 F5000.0 ;Shift sideways\n")
+    openFile.write("G1 X-1.7 Y20 Z0.28 F1500.0 E30 ;Draw second purge line\n")
+    openFile.write("G92 E0 ;Reset Extruder\n")
+    openFile.write("G1 E-1.0000 F1800 ;Retract\n")
+    openFile.write("G1 Z2.0 F3000 ;Lift Z\n")
+    openFile.write("G1 E0.0000 F1800 ;Reverse retract\n")
+    openFile.write("\n")
+    openFile.write("; Set bed centre as origin\n")
+    openFile.write("G0 X100 Y100 F2400 ;Move to centre\n")
+    openFile.write("G92 X100 Y100 ;Set bed centre as origin\n")
+    openFile.write("M83 ;Relative extrusion\n")
     openFile.write(";END OF HEADER\n")
 
     """ BODY """
-    # Remember to add half the layerHeight to the Z commands
     numLayers = len(transform3DList)
-    print(numLayers)
 
-    global E, previousE
-    E = 0  # Cumulative length of 1.75mm diameter filament used at every line of G-Code
-    previousE = 0
     for k in range(numLayers):  # For each layer
         openFile.write(";" + "Layer " + str(k) + "\n")
         if k == 0:  # If it's the initial layer, use initial layer speeds
@@ -1684,14 +1679,24 @@ def write_3_axis_gcode(newFile, savedFileName, printSettings, transform3DList, a
                     runOnce = False
 
     """ FOOTER """
-    openFile.write(";FOOTER:\n")
-    openFile.write("G1 F" + str(E_FEEDRATE) + " E" + str(round(E - 2.0, 5)) + " ;Retract for end of print\n")
-    openFile.write("G0 F" + str(G0Z_FEEDRATE) + " Z" + str(round(nozzleHeight + 10.0, 5)) + " ;Lift\n")
-    openFile.write("G28 X Y               ;Home X Y\n")
-    openFile.write("M104 S0               ;Turn off hotend\n")
-    openFile.write("M140 S0               ;Turn off bed\n")
-    openFile.write("M84                   ;Disable motors\n")
-    openFile.write(";End of GCODE\n")
+    openFile.write("\n")
+    openFile.write("; End sequence\n")
+    openFile.write("G91 ;Relative positioning\n")
+    openFile.write("G1 E-2 F2700 ;Retract\n")
+    openFile.write("G1 E-2 Z0.2 F2400 ;Retract and raise Z\n")
+    openFile.write("G1 X5 Y5 F3000 ;Wipe out\n")
+    openFile.write("G90 ;Absolute positioning\n")
+    openFile.write("\n")
+    openFile.write("G28 Z ;Home Z to max height\n")
+    openFile.write("G4 P1000 ;Wait for Z to settle\n")
+    openFile.write("\n")
+    openFile.write("G0 X110 Y200 ;Move bed to back for easy part removal\n")
+    openFile.write("\n")
+    openFile.write("M106 S0 ;Turn off fan\n")
+    openFile.write("M104 S0 ;Turn off hotend\n")
+    openFile.write("M140 S0 ;Turn off bed\n")
+    openFile.write("\n")
+    openFile.write("M84 X Y E ;Disable steppers except Z\n")
 
     openFile.close()
 
